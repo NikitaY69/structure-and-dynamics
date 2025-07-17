@@ -20,7 +20,15 @@ import os
 import glob
 
 # Parser
-parser = argparse.ArgumentParser(prog="ABPf", description="Visualize ABP simulations.")
+parser = argparse.ArgumentParser(
+    prog="ABPmov", 
+    description=("Visualize ABP simulations.\n"
+                 "\n"
+                 "This script visualizes the flow of active Brownian particles (ABP) " \
+                 "and stores the output as video file 'flow.mp4' in the provided" \
+                 "root directory."
+    )
+)
 parser.add_argument(
     "--rootdir", type=str, required=True,
     help="Path to the root directory of the simulation."
@@ -49,206 +57,212 @@ parser.add_argument(
     "--msd", action='store_true',
     help="Plot MSD evolution."
 )
-args = parser.parse_args()
-start = args.t0
-skip = args.skip
-
-t0 = time.time()
-# Loading parameters
-rootdir = args.rootdir
-json_files = glob.glob(os.path.join(rootdir, "*.json"))
-# basename = os.path.basename(os.path.normpath(rootdir))
-# f"{rootdir}/{basename}.json"
-with open(json_files[0], "r") as file:
-    params = json.load(file)
-
-skip = round(skip/(params["dt"]*params["skip"]))
-N = params["N"]
-L = np.sqrt(N/params["density"])
-steps = round(params["duration"]/params["dt"])
-# number_of_ss = int(steps/params["skip"])
-ss = np.arange(0, params["duration"], params["skip"]*params["dt"])
-frames = np.argwhere(ss>=start).flatten()[::skip]
-number_of_ss = len(frames)
-
-# Loading cfgs
-cfgs = []
-print('Loading configurations ...')
-for i in tqdm(frames[:-1]):
-    with h5py.File(f"{rootdir}snapshots.h5", "r") as f:
-        cfgs.append(f["configs"][i].T)
-
-if args.msd:
-    obs = np.genfromtxt(f"{rootdir}obs.txt", delimiter='', names=True)
-    MSD = obs['MSD']
 
 # Helper functions
-def shift_in_mainbox(a):
+def shift_in_mainbox(a, L):
     return a - L * np.floor((a + L/2) / (L))
 
-# Number of tracer particles
-n_tracers = args.ntracers
-tracer_indices = np.random.choice(N, n_tracers, replace=False)
-tracer_history = {idx: [] for idx in tracer_indices}
-colors = np.linspace(0, 1, n_tracers)
+def main():
+    args = parser.parse_args()
+    start = args.t0
+    skip = args.skip
 
-# Init fig
-if args.msd:
-    fig, axes = plt.subplots(1, 2, dpi=300, figsize=(12, 6))
-else:
-    fig, axes = plt.subplots(1, 1, dpi=300, figsize=(6, 6))
-ax_main = axes[0] if args.msd else axes
-ax_msd = axes[1] if args.msd else None
-plt.tight_layout()
-ax_main.set_facecolor('black')
+    t0 = time.time()
+    # Loading parameters
+    rootdir = args.rootdir
+    json_files = glob.glob(os.path.join(rootdir, "*.json"))
+    # basename = os.path.basename(os.path.normpath(rootdir))
+    # f"{rootdir}/{basename}.json"
+    with open(json_files[0], "r") as file:
+        params = json.load(file)
 
-# particles = ax_main.scatter([], [], s=np.sqrt(N), color='linen', alpha=0.5, linewidths=0.5)
+    skip = round(skip/(params["dt"]*params["skip"]))
+    N = params["N"]
+    L = np.sqrt(N/params["density"])
+    steps = round(params["duration"]/params["dt"])
+    # number_of_ss = int(steps/params["skip"])
+    ss = np.arange(0, params["duration"], params["skip"]*params["dt"])
+    frames = np.argwhere(ss>=start).flatten()[::skip]
+    number_of_ss = len(frames)
 
-if not args.selfprop:
-    particles = [Circle((0, 0), 0.5, facecolor='linen', linewidth=0.5, alpha=0.5) \
-                for _ in range(N)]
+    # Loading cfgs
+    cfgs = []
+    print('Loading configurations ...')
+    for i in tqdm(frames[:-1]):
+        with h5py.File(f"{rootdir}snapshots.h5", "r") as f:
+            cfgs.append(f["configs"][i].T)
 
-    for i, idx in enumerate(tracer_indices):
-        particles[idx].set_radius(1.0)
-        particles[idx].set_facecolor(cm.rainbow(colors[i]))
-        particles[idx].set_alpha(1)
-    particles_c = PatchCollection(particles, match_original=True)
-    tracer_lines = LineCollection([], linewidths=1, alpha=0.75, cmap='rainbow')
-else:
-    particles = [Circle((0, 0), 0.5, linewidth=0.5, alpha=0.5) \
-                for _ in range(N)]
-
-    for i, idx in enumerate(tracer_indices):
-        particles[idx].set_radius(1.0)
-        particles[idx].set_facecolor('black')
-        particles[idx].set_alpha(1)
-    particles_c = PatchCollection(particles, cmap='jet', match_original=True)
-    particles_c.set_clim(vmin=0, vmax=2*np.pi)
-    tracer_lines = LineCollection([], linewidths=1, alpha=0.75, color='k')
-    divider = make_axes_locatable(ax_main)
-    cbar_ax = divider.append_axes("right", size="5%", pad=0.1)
-    cbar = fig.colorbar(particles_c, cax=cbar_ax, label=r'$\theta_i$', ticks=[0, np.pi, 2*np.pi])
-    cbar.ax.set_yticklabels([r'$0$', r'$\pi$', r'$2\pi$'])
-    cbar.ax.yaxis.set_minor_locator(MultipleLocator(base=np.pi/2))
-
-ax_main.add_collection(particles_c)
-ax_main.add_collection(tracer_lines)
-
-# Init MSD
-if args.msd:
-    ax_msd.set_xlabel(r"$t$")
-    ax_msd.set_xscale('log')
-    ax_msd.set_yscale('log')
-    ax_msd.set_title("MSD")
-    ax_msd.set_autoscale_on(True)
-
-    msd_line, = ax_msd.plot([], [], color='k', label=r'$\langle \Delta r^2 \rangle$')
-    msd_lines = [ax_msd.plot([], [], color=plt.cm.rainbow(c), marker='none', lw=1)[0] for c in colors]
-    ax_msd.legend(loc='upper left')
-
-    msd_data = {idx: [] for idx in tracer_indices}
-    time_data = []
-    initial_positions = {}
-
-def init():
-    # Limits
-    ax_main.set_xlim([-L/2, L/2])
-    ax_main.set_ylim([-L/2, L/2])    
-    # Remove the border (spines)
-    for spine in ax_main.spines.values():
-        spine.set_visible(False)
-
-    # Remove ticks
-    # ax.add_patch(Rectangle((-L/2, -L/2), width=L, height=L, color='k', fill=False, linewidth=1))
-    ax_main.xaxis.set_ticks([])
-    ax_main.yaxis.set_ticks([])
-    ax_main.set_xticks([-L/2, L/2])
     if args.msd:
-        return particles_c, tracer_lines, *msd_lines, msd_line, 
+        obs = np.genfromtxt(f"{rootdir}obs.txt", delimiter='', names=True)
+        MSD = obs['MSD']
+
+    # Number of tracer particles
+    n_tracers = args.ntracers
+    tracer_indices = np.random.choice(N, n_tracers, replace=False)
+    tracer_history = {idx: [] for idx in tracer_indices}
+    colors = np.linspace(0, 1, n_tracers)
+
+    # Init fig
+    if args.msd:
+        fig, axes = plt.subplots(1, 2, dpi=300, figsize=(12, 6))
     else:
-        return particles_c, tracer_lines,
+        fig, axes = plt.subplots(1, 1, dpi=300, figsize=(6, 6))
+    ax_main = axes[0] if args.msd else axes
+    ax_msd = axes[1] if args.msd else None
+    plt.tight_layout()
+    ax_main.set_facecolor('black')
 
-segments = []
-segment_colors = []
-def update(t):
-    # s = int(t/params["dt"])
+    # particles = ax_main.scatter([], [], s=np.sqrt(N), color='linen', alpha=0.5, linewidths=0.5)
+
+    if not args.selfprop:
+        particles = [Circle((0, 0), 0.5, facecolor='linen', linewidth=0.5, alpha=0.5) \
+                    for _ in range(N)]
+
+        for i, idx in enumerate(tracer_indices):
+            particles[idx].set_radius(1.0)
+            particles[idx].set_facecolor(cm.rainbow(colors[i]))
+            particles[idx].set_alpha(1)
+        particles_c = PatchCollection(particles, match_original=True)
+        tracer_lines = LineCollection([], linewidths=1, alpha=0.75, cmap='rainbow')
+    else:
+        particles = [Circle((0, 0), 0.5, linewidth=0.5, alpha=0.5) \
+                    for _ in range(N)]
+
+        for i, idx in enumerate(tracer_indices):
+            particles[idx].set_radius(1.0)
+            particles[idx].set_facecolor('black')
+            particles[idx].set_alpha(1)
+        particles_c = PatchCollection(particles, cmap='jet', match_original=True)
+        particles_c.set_clim(vmin=0, vmax=2*np.pi)
+        tracer_lines = LineCollection([], linewidths=1, alpha=0.75, color='k')
+        divider = make_axes_locatable(ax_main)
+        cbar_ax = divider.append_axes("right", size="5%", pad=0.1)
+        cbar = fig.colorbar(particles_c, cax=cbar_ax, label=r'$\theta_i$', ticks=[0, np.pi, 2*np.pi])
+        cbar.ax.set_yticklabels([r'$0$', r'$\pi$', r'$2\pi$'])
+        cbar.ax.yaxis.set_minor_locator(MultipleLocator(base=np.pi/2))
+
+    ax_main.add_collection(particles_c)
+    ax_main.add_collection(tracer_lines)
+
+    # Init MSD
     if args.msd:
-        time_data.append(ss[frames[t]])
-    ax_main.set_title(r"$t=$"f"{ss[frames[t]]:.2f}")    
+        ax_msd.set_xlabel(r"$t$")
+        ax_msd.set_xscale('log')
+        ax_msd.set_yscale('log')
+        ax_msd.set_title("MSD")
+        ax_msd.set_autoscale_on(True)
 
-    # Positions
-    cfg = cfgs[t]
-    pos = np.vstack((shift_in_mainbox(cfg[1]), shift_in_mainbox(cfg[2]))).T
-    for i, p in enumerate(particles):
-        p.set_center((pos[i, 0], pos[i, 1]))
+        msd_line, = ax_msd.plot([], [], color='k', label=r'$\langle \Delta r^2 \rangle$')
+        msd_lines = [ax_msd.plot([], [], color=plt.cm.rainbow(c), marker='none', lw=1)[0] for c in colors]
+        ax_msd.legend(loc='upper left')
 
-    particles_c.set_paths(particles)
-    if args.selfprop:
-        particles_c.set_array(cfg[0] % (2*np.pi))
-    # scat.set_offsets(pos)
+        msd_data = {idx: [] for idx in tracer_indices}
+        time_data = []
+        initial_positions = {}
 
-    # Tracers
-    for i, idx in enumerate(tracer_indices):
-        xfull, yfull = cfg[1][idx], cfg[2][idx]
-        x, y = pos[idx]
-        tracer_history[idx].append((x, y))
-        
-        if len(tracer_history[idx]) > 1:
-            segment = np.array(tracer_history[idx][-2:])
-            segment2 = segment.copy()
-            dx, dy = segment[1] - segment[0]
-            
-            # Dealing with PBCs
-            if np.abs(dx) > L / 2:
-                if dx > 0:
-                    segment[1, 0] -= L
-                    segment2[0, 0] += L
-                else:
-                    segment[1, 0] += L
-                    segment2[0, 0] -= L
-            
-            if np.abs(dy) > L / 2:
-                if dy > 0:
-                    segment[1, 1] -= L
-                    segment2[0, 1] += L
-                else:
-                    segment[1, 1] += L
-                    segment2[0, 1] -= L
-            
-            segments.append(segment)
-            segments.append(segment2)
-            segment_colors.append(colors[i])
-            segment_colors.append(colors[i])
+    def init():
+        # Limits
+        ax_main.set_xlim([-L/2, L/2])
+        ax_main.set_ylim([-L/2, L/2])    
+        # Remove the border (spines)
+        for spine in ax_main.spines.values():
+            spine.set_visible(False)
 
-        # MSD
+        # Remove ticks
+        # ax.add_patch(Rectangle((-L/2, -L/2), width=L, height=L, color='k', fill=False, linewidth=1))
+        ax_main.xaxis.set_ticks([])
+        ax_main.yaxis.set_ticks([])
+        ax_main.set_xticks([-L/2, L/2])
         if args.msd:
-            if idx not in initial_positions:
-                initial_positions[idx] = np.array([xfull, yfull])
+            return particles_c, tracer_lines, *msd_lines, msd_line, 
+        else:
+            return particles_c, tracer_lines,
 
-            dx = xfull - initial_positions[idx][0]
-            dy = yfull - initial_positions[idx][1]
+    segments = []
+    segment_colors = []
+    def update(t):
+        # s = int(t/params["dt"])
+        if args.msd:
+            time_data.append(ss[frames[t]])
+        ax_main.set_title(r"$t=$"f"{ss[frames[t]]:.2f}")    
 
-            msd = dx**2 + dy**2
-            msd_data[idx].append(msd)
+        # Positions
+        cfg = cfgs[t]
+        pos = np.vstack((shift_in_mainbox(cfg[1], L), shift_in_mainbox(cfg[2], L))).T
+        for i, p in enumerate(particles):
+            p.set_center((pos[i, 0], pos[i, 1]))
 
-            msd_lines[i].set_data(time_data, msd_data[idx])
-            msd_line.set_data(time_data, MSD[:len(time_data)])
+        particles_c.set_paths(particles)
+        if args.selfprop:
+            particles_c.set_array(cfg[0] % (2*np.pi))
+        # scat.set_offsets(pos)
 
-    tracer_lines.set_segments(segments)
-    tracer_lines.set_array(np.array(segment_colors)) 
+        # Tracers
+        for i, idx in enumerate(tracer_indices):
+            xfull, yfull = cfg[1][idx], cfg[2][idx]
+            x, y = pos[idx]
+            tracer_history[idx].append((x, y))
+            
+            if len(tracer_history[idx]) > 1:
+                segment = np.array(tracer_history[idx][-2:])
+                segment2 = segment.copy()
+                dx, dy = segment[1] - segment[0]
+                
+                # Dealing with PBCs
+                if np.abs(dx) > L / 2:
+                    if dx > 0:
+                        segment[1, 0] -= L
+                        segment2[0, 0] += L
+                    else:
+                        segment[1, 0] += L
+                        segment2[0, 0] -= L
+                
+                if np.abs(dy) > L / 2:
+                    if dy > 0:
+                        segment[1, 1] -= L
+                        segment2[0, 1] += L
+                    else:
+                        segment[1, 1] += L
+                        segment2[0, 1] -= L
+                
+                segments.append(segment)
+                segments.append(segment2)
+                segment_colors.append(colors[i])
+                segment_colors.append(colors[i])
 
-    # Autoscale
-    if args.msd:
-        ax_msd.relim()
-        ax_msd.autoscale_view(True, True, True) 
-        return particles_c, tracer_lines, *msd_lines, msd_line,
-    else:
-        return particles_c, tracer_lines,
+            # MSD
+            if args.msd:
+                if idx not in initial_positions:
+                    initial_positions[idx] = np.array([xfull, yfull])
 
-fig.tight_layout()
-print('Making movie...')
-anim = animation.FuncAnimation(fig, update, init_func=init, frames=tqdm(range(number_of_ss-1)), blit=True)
-writermp4 = animation.FFMpegWriter(fps=args.fps)
-anim.save(f"{rootdir}flow.mp4", writer=writermp4)
-elapsed_time = (time.time() - t0)/60 # minutes
-print(f"Execution time: {elapsed_time:.3f} minutes")
+                dx = xfull - initial_positions[idx][0]
+                dy = yfull - initial_positions[idx][1]
+
+                msd = dx**2 + dy**2
+                msd_data[idx].append(msd)
+
+                msd_lines[i].set_data(time_data, msd_data[idx])
+                msd_line.set_data(time_data, MSD[:len(time_data)])
+
+        tracer_lines.set_segments(segments)
+        tracer_lines.set_array(np.array(segment_colors)) 
+
+        # Autoscale
+        if args.msd:
+            ax_msd.relim()
+            ax_msd.autoscale_view(True, True, True) 
+            return particles_c, tracer_lines, *msd_lines, msd_line,
+        else:
+            return particles_c, tracer_lines,
+
+    fig.tight_layout()
+    print('Making movie...')
+    anim = animation.FuncAnimation(fig, update, init_func=init, frames=tqdm(range(number_of_ss-1)), blit=True)
+    writermp4 = animation.FFMpegWriter(fps=args.fps)
+    anim.save(f"{rootdir}flow.mp4", writer=writermp4)
+    elapsed_time = (time.time() - t0)/60 # minutes
+    print(f"Execution time: {elapsed_time:.3f} minutes")
+
+
+if __name__ == "__main__":
+    main()

@@ -14,7 +14,14 @@ import h5py
 import glob
 
 # Parser
-parser = argparse.ArgumentParser(prog="ABPcorr", description="Compute ABP correlations.")
+parser = argparse.ArgumentParser(
+    prog="ABPcorr", 
+    description=("Compute ABP correlations in particles reference frame.\n"
+                 "\n"
+                 "Automatically loads the configurations from the root directory and computes " \
+                 "the correlations (corr.npy) in the same directory."
+    )
+)
 parser.add_argument(
     "--rootdir", type=str, required=True,
     help="Path to the root directory of the simulation."
@@ -52,44 +59,15 @@ parser.add_argument(
     help="Scale for linear section on norm."
 )
 parser.add_argument("--remake", action="store_true", help="Remake calculations even if already saved.")
-args = parser.parse_args()
-
-t0 = time.time()
-# Loading parameters
-rootdir = args.rootdir
-start = args.t0
-remake = args.remake
-sweep = args.sweep
-box_size = args.boxsize
-inf = args.inf
-maxB = args.maxB
-linthresh = args.linthresh
-linscale = args.linscale
-
-json_files = glob.glob(os.path.join(rootdir, "*.json"))
-with open(json_files[0], "r") as file:
-    params = json.load(file)
-N = params["N"]
-L = np.sqrt(N/params["density"])
-# steps = int(params["tau"]/params["dt"])
-# start = params["t0"]
-
-
-skip = round(args.skip/(params["dt"]*params["skip"]))
-# number_of_ss = int((steps-start)/params["skip"])
-ss = np.arange(0, params["duration"], params["skip"]*params["dt"])
-frames = np.argwhere(ss>=start).flatten()[::skip]
-number_of_frames = len(frames)
-print(number_of_frames)
 
 # Helper functions
-def shift_in_mainbox(a):
+def shift_in_mainbox(a, L):
     return a - L * np.floor((a + L/2) / (L))
 
-def minimum_image_dist(a, b):
+def minimum_image_dist(a, b, L):
     return L/2 - np.abs(np.abs(a-b)-L/2)
 
-def minimum_image_diff(z1, z2):
+def minimum_image_diff(z1, z2, L):
     dx = z1.real - z2.real
     dy = z1.imag - z2.imag
     # print(dx.shape)
@@ -105,64 +83,97 @@ def minimum_image_diff(z1, z2):
 def principal_angle(A):
     return (A + np.pi) % (2 * np.pi) - np.pi
 
-# jPDF parameters
-x_edges = np.arange(-box_size/2, box_size/2, sweep)
-y_edges = x_edges
+def main():
+    args = parser.parse_args()
 
-if f"corr.npy" not in os.listdir(rootdir) or remake:
-    # Loading configurations
-    thetas = np.empty(shape=(number_of_frames, N), dtype=float)
-    positions = np.empty(shape=(number_of_frames, N), dtype=complex)
-    print('Loading configurations ...')
-    for i, frame in tqdm(enumerate(frames), total=number_of_frames):
-        with h5py.File(f"{rootdir}snapshots.h5", "r") as f:
-            data = f["configs"][frame].T
-        thetas[i] = data[0]
-        pos = shift_in_mainbox(data[1:])
-        positions[i] = pos[0] + 1j * pos[1]
+    t0 = time.time()
+    # Loading parameters
+    rootdir = args.rootdir
+    start = args.t0
+    remake = args.remake
+    sweep = args.sweep
+    box_size = args.boxsize
+    inf = args.inf
+    maxB = args.maxB
+    linthresh = args.linthresh
+    linscale = args.linscale
 
-    corr = []
-    print('Computing correlations ...')
-    for i in tqdm(range(N)):
-        # Translating origin
-        centered_pos = minimum_image_diff(positions, positions[:, [i]])
-        # print(centered_pos.real.max(), centered_pos.imag.min())
+    json_files = glob.glob(os.path.join(rootdir, "*.json"))
+    with open(json_files[0], "r") as file:
+        params = json.load(file)
+    N = params["N"]
+    L = np.sqrt(N/params["density"])
+    # steps = int(params["tau"]/params["dt"])
+    # start = params["t0"]
 
-        # Rotating with respect to self-propulsion direction
-        centered_pos = centered_pos * np.exp(-1j * thetas[:, [i]])
-        
-        # Computing the pair-correlation
-        centered_pos = np.delete(centered_pos, i, axis=1)
-        # radius = np.abs(centered_pos).flatten()
-        # angles = np.angle(centered_pos).flatten()
-        # angles = np.angle(centered_pos)-thetas[:, [i]]
-        # angles = principal_angle(angles).flatten()
-        # corr.append(np.histogram(radius, r_edges)[0])
-        X = centered_pos.real.flatten()
-        Y = centered_pos.imag.flatten()
-        corr.append(np.histogram2d(X, Y, bins=[x_edges, y_edges])[0]/number_of_frames)
 
-    corr = np.sum(np.array(corr), axis=0)
-    np.save(f"{rootdir}corr.npy", corr)
+    skip = round(args.skip/(params["dt"]*params["skip"]))
+    # number_of_ss = int((steps-start)/params["skip"])
+    ss = np.arange(0, params["duration"], params["skip"]*params["dt"])
+    frames = np.argwhere(ss>=start).flatten()[::skip]
+    number_of_frames = len(frames)
+    print(number_of_frames)
+    # jPDF parameters
+    x_edges = np.arange(-box_size/2, box_size/2, sweep)
+    y_edges = x_edges
 
-else:
-    print('Correlations already computed. Loading...')
-    corr = np.load(f"{rootdir}corr.npy")
+    if f"corr.npy" not in os.listdir(rootdir) or remake:
+        # Loading configurations
+        thetas = np.empty(shape=(number_of_frames, N), dtype=float)
+        positions = np.empty(shape=(number_of_frames, N), dtype=complex)
+        print('Loading configurations ...')
+        for i, frame in tqdm(enumerate(frames), total=number_of_frames):
+            with h5py.File(f"{rootdir}snapshots.h5", "r") as f:
+                data = f["configs"][frame].T
+            thetas[i] = data[0]
+            pos = shift_in_mainbox(data[1:], L)
+            positions[i] = pos[0] + 1j * pos[1]
 
-# Renormalization
-norm = params["density"]*N*sweep**2# (box_size/sweep)**2 # params["density"]*(box_size/sweep)**2/(N)
-m = np.mean(corr[:, np.where(y_edges[:-1] > inf)])
-print(m, norm)
-corr = corr/norm - 1
+        corr = []
+        print('Computing correlations ...')
+        for i in tqdm(range(N)):
+            # Translating origin
+            centered_pos = minimum_image_diff(positions, positions[:, [i]], L)
+            # print(centered_pos.real.max(), centered_pos.imag.min())
 
-# Plot
-norm = mcolors.SymLogNorm(linthresh=linthresh, linscale=linscale, vmin=-maxB, vmax=maxB, base=10)
-plt.pcolormesh(x_edges, y_edges, corr.T, shading='auto', cmap='RdBu_r', norm=norm)
-plt.colorbar(label=r"$B(\boldsymbol{r})$")
+            # Rotating with respect to self-propulsion direction
+            centered_pos = centered_pos * np.exp(-1j * thetas[:, [i]])
+            
+            # Computing the pair-correlation
+            centered_pos = np.delete(centered_pos, i, axis=1)
+            # radius = np.abs(centered_pos).flatten()
+            # angles = np.angle(centered_pos).flatten()
+            # angles = np.angle(centered_pos)-thetas[:, [i]]
+            # angles = principal_angle(angles).flatten()
+            # corr.append(np.histogram(radius, r_edges)[0])
+            X = centered_pos.real.flatten()
+            Y = centered_pos.imag.flatten()
+            corr.append(np.histogram2d(X, Y, bins=[x_edges, y_edges])[0]/number_of_frames)
 
-plt.xlabel(r"$x$")
-plt.ylabel(r"$y$")
+        corr = np.sum(np.array(corr), axis=0)
+        np.save(f"{rootdir}corr.npy", corr)
 
-plt.savefig(f"{rootdir}corr.jpg", bbox_inches='tight', dpi=400)
-elapsed_time = (time.time() - t0)/60 # minutes
-print(f"Execution time: {elapsed_time:.3f} minutes")
+    else:
+        print('Correlations already computed. Loading...')
+        corr = np.load(f"{rootdir}corr.npy")
+
+    # Renormalization
+    norm = params["density"]*N*sweep**2# (box_size/sweep)**2 # params["density"]*(box_size/sweep)**2/(N)
+    m = np.mean(corr[:, np.where(y_edges[:-1] > inf)])
+    print(m, norm)
+    corr = corr/norm - 1
+
+    # Plot
+    norm = mcolors.SymLogNorm(linthresh=linthresh, linscale=linscale, vmin=-maxB, vmax=maxB, base=10)
+    plt.pcolormesh(x_edges, y_edges, corr.T, shading='auto', cmap='RdBu_r', norm=norm)
+    plt.colorbar(label=r"$B(\boldsymbol{r})$")
+
+    plt.xlabel(r"$x$")
+    plt.ylabel(r"$y$")
+
+    plt.savefig(f"{rootdir}corr.jpg", bbox_inches='tight', dpi=400)
+    elapsed_time = (time.time() - t0)/60 # minutes
+    print(f"Execution time: {elapsed_time:.3f} minutes")
+
+if __name__ == "__main__":
+    main()

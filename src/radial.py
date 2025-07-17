@@ -15,7 +15,11 @@ import h5py
 import glob
 
 # Parser
-parser = argparse.ArgumentParser(prog="ABPcorr", description="Compute ABP correlations.")
+parser = argparse.ArgumentParser(
+    prog="ABPrdf", 
+    description=("Compute ABP radial distribution function."
+    )
+)
 parser.add_argument(
     "--rootdir", type=str, required=True,
     help="Path to the root directory of the simulation."
@@ -130,3 +134,6 @@ ax.yaxis.set_minor_locator(AutoMinorLocator())
 plt.savefig(f"{rootdir}radial.jpg", bbox_inches='tight', dpi=400)
 elapsed_time = (time.time() - t0)/60 # minutes
 print(f"Execution time: {elapsed_time:.3f} minutes")
+
+if __name__ == "__main__":
+    main()
