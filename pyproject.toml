@@ -13,12 +13,12 @@ dependencies = [
 ]
 
 [project.scripts]
-abp-mov = "src.flow:main"
-abp-clust = "src.clusters:main"
-abp-corr = "src.corr:main"
-abp-rdf = "src.radial:main"
-abp-obs = "src.analysis:main"
-abp-den = "src.density_field:main"
+abp-mov = "postproc.flow:main"
+abp-clust = "postproc.clusters:main"
+abp-corr = "postproc.corr:main"
+abp-rdf = "postproc.radial:main"
+abp-obs = "postproc.analysis:main"
+abp-den = "postproc.density_field:main"
 
 [build-system]
 requires = ["setuptools>=64", "wheel"]
