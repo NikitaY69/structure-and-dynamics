@@ -6,6 +6,7 @@ of ABP simulations.
 You can install our package in a dedicated python environment. To do so, you need to possess a Python 3 distribution. 
 ```
 python -m venv postproc
+source postproc/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
