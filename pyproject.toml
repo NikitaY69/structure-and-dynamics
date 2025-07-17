@@ -1,0 +1,21 @@
+[project]
+name = "abp-pp"
+version = "0.1.0"
+description = "Post-processing tools for ABP simulations"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "h5py",
+    "tqdm"
+]
+
+[project.scripts]
+abp-mov = "src.flow:main"
+abp-clust = "src.clusters:main"
+abp-corr = "src.corr:main"
+abp-rdf = "src.radial:main"
+abp-obs = "src.analysis:main"
+abp-den = "src.density_field:main"
