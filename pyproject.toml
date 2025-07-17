@@ -19,3 +19,7 @@ abp-corr = "src.corr:main"
 abp-rdf = "src.radial:main"
 abp-obs = "src.analysis:main"
 abp-den = "src.density_field:main"
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
